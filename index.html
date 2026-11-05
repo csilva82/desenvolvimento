@@ -113,6 +113,16 @@ const SVGNS = 'http://www.w3.org/2000/svg';
 const _q = new URLSearchParams(location.search).get('api');
 if (_q !== null) localStorage.setItem('api', _q.replace(/\/$/, ''));
 const API = localStorage.getItem('api') || '';
+async function apiJson(rota, opts) {
+  let resp;
+  try { resp = await fetch(API + rota, opts); }
+  catch (e) { throw new Error('Não consegui conectar ao backend (' + (API || location.origin) + ').\n' +
+    'Verifique se o server.py está rodando e, no GitHub Pages, se a URL do backend foi informada com ?api=...'); }
+  const txt = await resp.text();
+  try { return JSON.parse(txt); }
+  catch (e) { throw new Error('O endereço ' + (API || location.origin) + rota + ' não respondeu como o servidor de compilação (HTTP ' + resp.status + ').\n' +
+    'Este site precisa do backend (server.py). Abra http://localhost:5000, use o Codespaces, ou informe o backend com ?api=https://seu-backend na URL.'); }
+}
 
 /* ============ definição dos nós ============ */
 const DEFS = {
@@ -320,9 +330,9 @@ async function compilar() {
   showTab('pLog'); log('Compilando… (a 1ª vez pode demorar)'); $('#downloads').innerHTML = '';
   let r;
   try {
-    r = await (await fetch(API + '/compile', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({sketch: code, fqbn: $('#board').value})})).json();
-  } catch (e) { log('Falha ao falar com o servidor: ' + e); return null; }
+    r = await apiJson('/compile', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({sketch: code, fqbn: $('#board').value})});
+  } catch (e) { log(e.message); return null; }
   log(r.log || '');
   if (!r.ok) return null;
   lastFiles = r.files;
@@ -409,7 +419,7 @@ function stopSim() { if (sim) { cancelAnimationFrame(sim.raf); sim = null; } }
 
 /* ============ gravar via arduino-cli (servidor local) ============ */
 async function atualizarPortas() {
-  const r = await (await fetch(API + '/ports')).json();
+  const r = await apiJson('/ports');
   const s = $('#port'); s.innerHTML = '';
   (r.ports || []).forEach(p => { const o = document.createElement('option'); o.textContent = p; s.appendChild(o); });
   if (!s.children.length) s.innerHTML = '<option value="">(nenhuma porta)</option>';
@@ -418,8 +428,11 @@ async function gravar() {
   const port = $('#port').value;
   if (!port) { alert('Selecione uma porta (↻ para atualizar).'); return; }
   showTab('pLog'); log('Compilando e gravando em ' + port + '…');
-  const r = await (await fetch(API + '/upload', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({sketch: genCode(), fqbn: $('#board').value, port})})).json();
+  let r;
+  try {
+    r = await apiJson('/upload', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({sketch: genCode(), fqbn: $('#board').value, port})});
+  } catch (e) { log(e.message); return; }
   log((r.ok ? '✔ Gravado com sucesso\n\n' : '✘ Falhou\n\n') + (r.log || ''));
 }
 
