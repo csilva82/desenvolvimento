@@ -66,7 +66,9 @@
     <option value="esp32:esp32:esp32">ESP32</option>
   </select>
   <button class="pri" id="bCompile">Compilar</button>
-  <button class="ok" id="bSim">▶ Simular</button>
+  <button class="ok" id="bSimD" title="Interpreta os nós direto no navegador, sem backend">▶ Simular (sem compilar)</button>
+  <button class="ok" id="bSim" title="Compila e executa o .hex (precisa do backend)">▶ Simular .hex</button>
+  <button id="bIno">Baixar .ino</button>
   <button class="bad" id="bStop">■ Parar</button>
   <span style="flex:1"></span>
   <select id="port"><option value="">(porta)</option></select>
@@ -93,6 +95,7 @@
     <div id="pSim" class="panel">
       <small>Clique e segure os botões para simular um botão ligado ao pino (pressionado = LOW, solto = HIGH). Só AVR (Uno/Nano).</small>
       <div id="pins" style="margin-top:8px"></div>
+      <div id="analog" style="margin-bottom:10px"></div>
       <b>Serial</b>
       <div id="serial"><pre id="serialOut"></pre></div>
       <small id="simInfo"></small>
@@ -364,6 +367,14 @@ function buildPins() {
       (p >= 2 ? `<button data-p="${p}">btn</button>` : '');
     box.appendChild(d);
   }
+  const an = $('#analog'); an.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const r = document.createElement('label'); r.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:11px;color:#9aa3b8';
+    r.innerHTML = `A${i} <input type="range" min="0" max="1023" value="512" style="flex:1"><span style="width:34px">512</span>`;
+    const s = r.querySelector('input'), v = r.querySelector('span');
+    s.oninput = () => { analogVals[i] = +s.value; v.textContent = s.value; };
+    an.appendChild(r);
+  }
 }
 function pinMap(ports, p) {            // pino Arduino → {porta, bit}
   if (p <= 7) return {port: ports.D, bit: p};
@@ -415,7 +426,63 @@ async function simular() {
   };
   frame();
 }
-function stopSim() { if (sim) { cancelAnimationFrame(sim.raf); sim = null; } }
+function stopSim() {
+  if (sim) { cancelAnimationFrame(sim.raf); sim = null; }
+  if (direct) { direct.run = false; direct = null; }
+}
+
+/* ============ simulação direta (interpreta os nós, sem compilar) ============ */
+let direct = null;
+const analogVals = [512, 512, 512, 512, 512, 512];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function pinNum(p) { p = String(p).trim().toUpperCase(); return /^A\d$/.test(p) ? 14 + (+p[1]) : parseInt(p, 10); }
+function serialPrint(t) {
+  const o = $('#serialOut'); o.textContent += t;
+  if (o.textContent.length > 5000) o.textContent = o.textContent.slice(-4000);
+  $('#serial').scrollTop = 1e9;
+}
+async function simularDireto() {
+  stopSim(); showTab('pSim'); $('#serialOut').textContent = '';
+  const st = {run: true, mode: {}, out: {}, inp: {}};
+  direct = st;
+  for (let p = 0; p <= 13; p++) { st.inp[p] = 1; const l = $('#led' + p); l.classList.remove('on'); l.style.opacity = ''; }
+  document.querySelectorAll('#pins button').forEach(b => {
+    const p = +b.dataset.p, down = () => { st.inp[p] = 0; }, up = () => { st.inp[p] = 1; };
+    b.onmousedown = down; b.onmouseup = up; b.onmouseleave = up;
+  });
+  const setLed = (p, v) => { const l = $('#led' + p); if (!l) return;
+    l.classList.toggle('on', v > 0); l.style.opacity = v > 0 && v < 255 ? (0.25 + 0.75 * v / 255) : ''; };
+  const rd = p => st.mode[p] === 'OUTPUT' ? (st.out[p] > 0 ? 1 : 0) : (st.inp[p] ?? 1);
+  let steps = 0;
+  const run = async id => {
+    while (id != null && st.run) {
+      if (++steps % 200 === 0) await sleep(0);
+      const n = nodes[id], d = n.data, def = DEFS[n.type], last = def.outs.length - 1, p = pinNum(d.pin);
+      switch (n.type) {
+        case 'pinMode': st.mode[p] = d.mode; break;
+        case 'dwrite': { const v = d.val === 'INVERTER' ? (st.out[p] > 0 ? 0 : 255) : (d.val === 'HIGH' ? 255 : 0);
+                         st.out[p] = v; setLed(p, v); break; }
+        case 'awrite': { const v = Math.max(0, Math.min(255, +d.val || 0)); st.out[p] = v; setLed(p, v); break; }
+        case 'delay':  await sleep(Math.max(0, +d.ms || 0)); break;
+        case 'sprint': serialPrint(d.txt + (d.nl === 'println' ? '\n' : '')); break;
+        case 'aread':  serialPrint((analogVals[p - 14] ?? 0) + '\n'); break;
+        case 'ifpin':  await run(nextOf(id, rd(p) === (d.lvl === 'HIGH' ? 1 : 0) ? 0 : 1)); break;
+        case 'repeat': for (let i = 0; i < (+d.n || 0) && st.run; i++) { await run(nextOf(id, 0)); await sleep(0); } break;
+      }
+      id = nextOf(id, last);
+    }
+  };
+  const hats = t => Object.values(nodes).filter(n => n.type === t).sort((a, b) => a.y - b.y);
+  $('#simInfo').textContent = 'Simulação direta em tempo real (interpreta os nós; não usa o .hex).';
+  for (const hd of hats('setup')) await run(nextOf(hd.id, 0));
+  while (st.run) { for (const hd of hats('loop')) await run(nextOf(hd.id, 0)); await sleep(0); }
+}
+
+function baixarIno() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([genCode()], {type: 'text/plain'}));
+  a.download = 'sketch.ino'; a.click();
+}
 
 /* ============ gravar via arduino-cli (servidor local) ============ */
 async function atualizarPortas() {
@@ -457,6 +524,8 @@ function abrir(file) {
 /* ============ eventos ============ */
 $('#bCompile').onclick = compilar;
 $('#bSim').onclick = simular;
+$('#bSimD').onclick = simularDireto;
+$('#bIno').onclick = baixarIno;
 $('#bStop').onclick = stopSim;
 $('#bFlash').onclick = gravar;
 $('#bPorts').onclick = atualizarPortas;
