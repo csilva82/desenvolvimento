@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Editor de Nós – Arduino / ESP32</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font:13px system-ui,sans-serif;background:#12151c;color:#e5e7eb;height:100vh;display:flex;flex-direction:column}
+  header{display:flex;gap:6px;align-items:center;padding:8px;background:#1b1f2a;border-bottom:1px solid #2b3040;flex-wrap:wrap}
+  header b{margin-right:8px}
+  button,select,input{font:inherit}
+  button{background:#2b3347;color:#e5e7eb;border:1px solid #3b4460;border-radius:6px;padding:5px 10px;cursor:pointer}
+  button:hover{background:#38425e}
+  button.pri{background:#2563eb;border-color:#2563eb}
+  button.ok{background:#16a34a;border-color:#16a34a}
+  button.bad{background:#b91c1c;border-color:#b91c1c}
+  select,input[type=text],input[type=number]{background:#0f1218;color:#e5e7eb;border:1px solid #3b4460;border-radius:5px;padding:3px 5px}
+  main{flex:1;display:flex;min-height:0}
+  #palette{width:150px;padding:8px;background:#161a23;border-right:1px solid #2b3040;overflow:auto;display:flex;flex-direction:column;gap:5px}
+  #palette h4{margin:6px 0 2px;color:#9aa3b8;font-weight:600}
+  #palette button{text-align:left;border-left:4px solid var(--c)}
+  #scroll{flex:1;overflow:auto;position:relative;background:#0f1218}
+  #canvas{position:relative;width:3000px;height:2000px;
+    background-image:radial-gradient(#252b3a 1px,transparent 1px);background-size:20px 20px}
+  #wires{position:absolute;inset:0;width:3000px;height:2000px;pointer-events:none}
+  #wires path{fill:none;stroke:#60a5fa;stroke-width:3;pointer-events:stroke;cursor:pointer}
+  #wires path:hover{stroke:#f87171}
+  #wires path.tmp{stroke:#fbbf24;stroke-dasharray:5 4;pointer-events:none}
+  .node{position:absolute;width:190px;background:#1e2433;border:1px solid #3b4460;border-radius:8px;box-shadow:0 4px 10px #0006;user-select:none}
+  .node .hd{display:flex;align-items:center;gap:6px;padding:6px 8px 6px 18px;background:var(--c);border-radius:7px 7px 0 0;cursor:move;position:relative}
+  .node .hd b{flex:1;font-size:12px}
+  .node .hd .x{cursor:pointer;opacity:.8;padding:0 3px}
+  .node .hd .x:hover{opacity:1}
+  .node .bd{padding:6px 8px;display:flex;flex-direction:column;gap:5px}
+  .node label{display:flex;justify-content:space-between;align-items:center;gap:6px}
+  .node label input,.node label select{width:95px}
+  .node .out{display:flex;justify-content:flex-end;align-items:center;gap:6px;padding:3px 0;color:#9aa3b8}
+  .port{width:14px;height:14px;border-radius:50%;background:#e5e7eb;border:2px solid #12151c;cursor:crosshair;display:inline-block}
+  .port:hover{background:#fbbf24}
+  .port.in{position:absolute;left:-8px;top:50%;margin-top:-7px}
+  .port.out{margin-right:-15px}
+  #right{width:430px;display:flex;flex-direction:column;border-left:1px solid #2b3040;background:#161a23}
+  #tabs{display:flex}
+  #tabs button{flex:1;border-radius:0;border:0;border-bottom:2px solid transparent;background:transparent}
+  #tabs button.on{border-color:#2563eb;background:#1b1f2a}
+  .panel{display:none;flex:1;overflow:auto;padding:8px;min-height:0}
+  .panel.on{display:block}
+  pre{margin:0;white-space:pre-wrap;font:12px ui-monospace,Consolas,monospace}
+  #pins{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:10px}
+  .pin{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;color:#9aa3b8}
+  .led{width:22px;height:22px;border-radius:50%;background:#3a2020;border:2px solid #555}
+  .led.on{background:#ef4444;box-shadow:0 0 12px #ef4444;border-color:#fca5a5}
+  .pin button{padding:1px 6px;font-size:11px}
+  #serial{background:#0b0d12;border:1px solid #2b3040;border-radius:6px;padding:6px;height:200px;overflow:auto}
+  a.dl{display:block;margin:4px 0;color:#60a5fa}
+  small{color:#9aa3b8}
+  #hw{flex:1;display:none;flex-direction:column;min-width:0;background:#0f1218}
+  #hwbar{display:flex;gap:6px;align-items:center;padding:6px 8px;background:#161a23;border-bottom:1px solid #2b3040;flex-wrap:wrap}
+  #potbar label{margin-right:8px;font-size:12px;color:#9aa3b8}
+  #hwwarn{color:#f87171;font-weight:600}
+  #hwsvg{flex:1;width:100%;min-height:0;user-select:none}
+  #hwsvg text{fill:#cbd5e1;font:10px system-ui;pointer-events:none}
+  #hwsvg .term{fill:#fbbf24;stroke:#12151c;stroke-width:2;cursor:crosshair}
+  #hwsvg .term:hover{fill:#fff}
+  #hwsvg .wire{fill:none;stroke-width:3;stroke-linecap:round;cursor:pointer}
+  #hwsvg .wire:hover{stroke:#f87171!important}
+  #hwsvg .comp{cursor:move}
+  #hwsvg .leg{stroke:#cbd5e1;stroke-width:2}
+</style>
+</head>
+<body>
+<header>
+  <b>⚙ Editor de Nós</b>
+  <button id="bTabP" class="pri">Programa</button><button id="bTabH">Hardware</button>
+  <select id="board"><option value="arduino:avr:uno">Arduino Uno</option></select>
+  <button class="ok" id="bSimD" title="Interpreta os nós direto no navegador, sem backend">▶ Simular</button>
+  <button id="bIno">Baixar .ino</button>
+  <button class="bad" id="bStop">■ Parar</button>
+  <span style="flex:1"></span>
+  <span style="flex:1"></span>
+  <button id="bSave">Salvar projeto</button>
+  <button id="bOpen">Abrir projeto</button>
+  <input type="file" id="file" accept=".json" hidden>
+</header>
+
+<main>
+  <div id="palette"></div>
+  <div id="scroll">
+    <div id="canvas"><svg id="wires"></svg></div>
+  </div>
+  <div id="hw">
+    <div id="hwbar">
+      <button data-add="led">+ LED</button><button data-add="res">+ Resistor</button>
+      <button data-add="btn">+ Botão</button><button data-add="pot">+ Potenciômetro</button>
+      <span id="potbar"></span><span id="hwwarn"></span>
+    </div>
+    <svg id="hwsvg" viewBox="0 0 760 520"></svg>
+    <small style="padding:4px 8px">Arraste do ponto amarelo até outro ponto para ligar um fio · clique no fio para remover · duplo clique no componente para excluir · clique no LED para trocar a cor.</small>
+  </div>
+  <div id="right">
+    <div id="tabs">
+      <button data-t="pCode" class="on">Código</button>
+      <button data-t="pSim">Simulação</button>
+    </div>
+    <div id="pCode" class="panel on"><pre id="code"></pre></div>
+    <div id="pSim" class="panel">
+      <small>Clique e segure os botões para simular um botão ligado ao pino (pressionado = LOW, solto = HIGH). Só AVR (Uno/Nano).</small>
+      <div id="pins" style="margin-top:8px"></div>
+      <div id="analog" style="margin-bottom:10px"></div>
+      <b>Serial</b>
+      <div id="serial"><pre id="serialOut"></pre></div>
+      <small id="simInfo"></small>
+    </div>
+    </div>
+</main>
+
+<script>
+/* ============ utilitários ============ */
+const $ = s => document.querySelector(s);
+const canvas = $('#canvas'), wires = $('#wires');
+const F = {
+  pin:  {k:'pin', t:'num', label:'Pino', def:13},
+};
+const SVGNS = 'http://www.w3.org/2000/svg';
+// URL do backend: ?api=https://meu-servidor.onrender.com (fica salva no navegador). Vazio = mesmo servidor.
+const _q = new URLSearchParams(location.search).get('api');
+if (_q !== null) localStorage.setItem('api', _q.replace(/\/$/, ''));
+const API = localStorage.getItem('api') || '';
+async function apiJson(rota, opts) {
+  let resp;
+  try { resp = await fetch(API + rota, opts); }
+  catch (e) { throw new Error('Não consegui conectar ao backend (' + (API || location.origin) + ').\n' +
+    'Verifique se o server.py está rodando e, no GitHub Pages, se a URL do backend foi informada com ?api=...'); }
+  const txt = await resp.text();
+  try { return JSON.parse(txt); }
+  catch (e) { throw new Error('O endereço ' + (API || location.origin) + rota + ' não respondeu como o servidor de compilação (HTTP ' + resp.status + ').\n' +
+    'Este site precisa do backend (server.py). Abra http://localhost:5000, use o Codespaces, ou informe o backend com ?api=https://seu-backend na URL.'); }
+}
+
+/* ============ definição dos nós ============ */
+const DEFS = {
+  setup:   {title:'Setup (início)', color:'#7c3aed', ins:0, outs:['▶'], fields:[], gen:()=>''},
+  loop:    {title:'Loop (repete)',  color:'#7c3aed', ins:0, outs:['▶'], fields:[], gen:()=>''},
+  pinMode: {title:'Modo do pino', color:'#0284c7', ins:1, outs:['▶'],
+            fields:[F.pin,{k:'mode',t:'sel',label:'Modo',opts:['OUTPUT','INPUT','INPUT_PULLUP'],def:'OUTPUT'}],
+            gen:(d,I)=>`${I}pinMode(${d.pin}, ${d.mode});\n`},
+  dwrite:  {title:'Escrever digital', color:'#16a34a', ins:1, outs:['▶'],
+            fields:[F.pin,{k:'val',t:'sel',label:'Valor',opts:['HIGH','LOW','INVERTER'],def:'HIGH'}],
+            gen:(d,I)=> d.val==='INVERTER'
+              ? `${I}digitalWrite(${d.pin}, !digitalRead(${d.pin}));\n`
+              : `${I}digitalWrite(${d.pin}, ${d.val});\n`},
+  awrite:  {title:'Escrever PWM', color:'#16a34a', ins:1, outs:['▶'],
+            fields:[F.pin,{k:'val',t:'num',label:'Valor 0-255',def:128}],
+            gen:(d,I)=>`${I}analogWrite(${d.pin}, ${d.val});\n`},
+  delay:   {title:'Esperar (ms)', color:'#ca8a04', ins:1, outs:['▶'],
+            fields:[{k:'ms',t:'num',label:'ms',def:500}],
+            gen:(d,I)=>`${I}delay(${d.ms});\n`},
+  sbegin:  {title:'Serial.begin', color:'#db2777', ins:1, outs:['▶'],
+            fields:[{k:'baud',t:'sel',label:'Baud',opts:['9600','19200','57600','115200'],def:'9600'}],
+            gen:(d,I)=>`${I}Serial.begin(${d.baud});\n`},
+  sprint:  {title:'Serial imprimir', color:'#db2777', ins:1, outs:['▶'],
+            fields:[{k:'txt',t:'txt',label:'Texto',def:'Olá'},
+                    {k:'nl',t:'sel',label:'Tipo',opts:['println','print'],def:'println'}],
+            gen:(d,I)=>`${I}Serial.${d.nl}(${JSON.stringify(d.txt)});\n`},
+  aread:   {title:'Ler analógico → Serial', color:'#db2777', ins:1, outs:['▶'],
+            fields:[{k:'pin',t:'txt',label:'Pino',def:'A0'}],
+            gen:(d,I)=>`${I}Serial.println(analogRead(${d.pin}));\n`},
+  ifpin:   {title:'Se pino digital', color:'#ea580c', ins:1, outs:['então','senão','▶ depois'],
+            fields:[F.pin,{k:'lvl',t:'sel',label:'for',opts:['LOW','HIGH'],def:'LOW'}],
+            gen:(d,I,b)=>`${I}if (digitalRead(${d.pin}) == ${d.lvl}) {\n${b[0]}${I}} else {\n${b[1]}${I}}\n`},
+  repeat:  {title:'Repetir N vezes', color:'#ea580c', ins:1, outs:['corpo','▶ depois'],
+            fields:[{k:'n',t:'num',label:'N',def:3}],
+            gen:(d,I,b)=>`${I}for (int _i = 0; _i < ${d.n}; _i++) {\n${b[0]}${I}}\n`},
+};
+const GROUPS = {'Estrutura':['setup','loop'],'Pinos':['pinMode','dwrite','awrite','aread'],
+                'Tempo':['delay'],'Serial':['sbegin','sprint'],'Controle':['ifpin','repeat']};
+
+/* ============ estado ============ */
+let nodes = {}, links = [], nid = 1;
+
+/* ============ paleta ============ */
+const pal = $('#palette');
+for (const [g, list] of Object.entries(GROUPS)) {
+  const h = document.createElement('h4'); h.textContent = g; pal.appendChild(h);
+  list.forEach(t => {
+    const b = document.createElement('button');
+    b.textContent = DEFS[t].title; b.style.setProperty('--c', DEFS[t].color);
+    b.onclick = () => { const sc = $('#scroll');
+      addNode(t, sc.scrollLeft + 40 + Math.random()*60, sc.scrollTop + 40 + Math.random()*60); genCode(); };
+    pal.appendChild(b);
+  });
+}
+
+/* ============ nós ============ */
+function addNode(type, x, y, data, forceId) {
+  const id = forceId || nid++;
+  if (forceId && forceId >= nid) nid = forceId + 1;
+  const d = {}; DEFS[type].fields.forEach(f => d[f.k] = f.def);
+  nodes[id] = {id, type, x, y, data: Object.assign(d, data || {})};
+  mountNode(nodes[id]); drawLinks(); return id;
+}
+
+function mountNode(n) {
+  const def = DEFS[n.type];
+  const el = document.createElement('div');
+  el.className = 'node'; el.id = 'n' + n.id;
+  el.style.left = n.x + 'px'; el.style.top = n.y + 'px';
+  el.style.setProperty('--c', def.color);
+
+  const hd = document.createElement('div'); hd.className = 'hd';
+  if (def.ins) { const p = document.createElement('i'); p.className = 'port in'; p.dataset.id = n.id; hd.appendChild(p); }
+  hd.innerHTML += `<b>${def.title}</b><span class="x">×</span>`;
+  el.appendChild(hd);
+
+  const bd = document.createElement('div'); bd.className = 'bd';
+  def.fields.forEach(f => {
+    const row = document.createElement('label'); row.append(f.label);
+    let inp;
+    if (f.t === 'sel') {
+      inp = document.createElement('select');
+      f.opts.forEach(o => { const op = document.createElement('option'); op.textContent = o; inp.appendChild(op); });
+    } else { inp = document.createElement('input'); inp.type = f.t === 'num' ? 'number' : 'text'; }
+    inp.value = n.data[f.k];
+    inp.oninput = () => { n.data[f.k] = inp.value; genCode(); };
+    inp.onmousedown = e => e.stopPropagation();
+    row.appendChild(inp); bd.appendChild(row);
+  });
+  def.outs.forEach((lab, i) => {
+    const r = document.createElement('div'); r.className = 'out';
+    r.innerHTML = `<span>${lab}</span><i class="port out" data-id="${n.id}" data-p="${i}"></i>`;
+    bd.appendChild(r);
+  });
+  el.appendChild(bd);
+  canvas.appendChild(el);
+
+  // excluir
+  hd.querySelector('.x').onclick = () => {
+    el.remove(); delete nodes[n.id];
+    links = links.filter(l => l.from !== n.id && l.to !== n.id);
+    drawLinks(); genCode();
+  };
+  // arrastar
+  hd.onmousedown = e => {
+    if (e.target.closest('.port') || e.target.closest('.x')) return;
+    const ox = e.clientX - n.x, oy = e.clientY - n.y;
+    const mv = ev => { n.x = Math.max(0, ev.clientX - ox); n.y = Math.max(0, ev.clientY - oy);
+      el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; drawLinks(); };
+    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  };
+  // ligar fios a partir das portas de saída
+  bd.querySelectorAll('.port.out').forEach(p => p.onmousedown = e => startWire(e, n.id, +p.dataset.p));
+}
+
+/* ============ fios ============ */
+function center(el) {
+  const r = el.getBoundingClientRect(), c = canvas.getBoundingClientRect();
+  return {x: r.left - c.left + r.width/2, y: r.top - c.top + r.height/2};
+}
+function bez(a, b) {
+  const dx = Math.max(50, Math.abs(b.x - a.x) / 2);
+  return `M${a.x},${a.y} C${a.x+dx},${a.y} ${b.x-dx},${b.y} ${b.x},${b.y}`;
+}
+function drawLinks() {
+  wires.innerHTML = '';
+  links.forEach((l, i) => {
+    const a = document.querySelector(`#n${l.from} .port.out[data-p="${l.port}"]`);
+    const b = document.querySelector(`#n${l.to} .port.in`);
+    if (!a || !b) return;
+    const p = document.createElementNS(SVGNS, 'path');
+    p.setAttribute('d', bez(center(a), center(b)));
+    p.onclick = () => { if (confirm('Remover esta ligação?')) { links.splice(i, 1); drawLinks(); genCode(); } };
+    wires.appendChild(p);
+  });
+}
+function startWire(e, from, port) {
+  e.preventDefault(); e.stopPropagation();
+  const a = center(e.target);
+  const tmp = document.createElementNS(SVGNS, 'path'); tmp.setAttribute('class', 'tmp'); wires.appendChild(tmp);
+  const mv = ev => { const c = canvas.getBoundingClientRect();
+    tmp.setAttribute('d', bez(a, {x: ev.clientX - c.left, y: ev.clientY - c.top})); };
+  const up = ev => {
+    document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+    tmp.remove();
+    const t = document.elementFromPoint(ev.clientX, ev.clientY);
+    const inp = t && t.closest('.port.in');
+    if (inp && +inp.dataset.id !== from) {
+      links = links.filter(l => !(l.from === from && l.port === port));   // 1 fio por saída
+      links.push({from, port, to: +inp.dataset.id});
+      genCode();
+    }
+    drawLinks();
+  };
+  document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+}
+
+/* ============ gerador de código ============ */
+function nextOf(id, p) { const l = links.find(l => l.from === id && l.port === p); return l ? l.to : null; }
+function genChain(id, ind, seen) {
+  let out = '';
+  while (id != null && !seen.has(id)) {
+    seen.add(id);
+    const n = nodes[id], def = DEFS[n.type], last = def.outs.length - 1;
+    const body = def.outs.slice(0, last).map((_, p) => genChain(nextOf(id, p), ind + '  ', new Set(seen)));
+    out += def.gen(n.data, ind, body);
+    id = nextOf(id, last);
+  }
+  return out;
+}
+function genCode() {
+  let s = '', l = '';
+  Object.values(nodes).sort((a, b) => a.y - b.y).forEach(n => {
+    if (n.type === 'setup') s += genChain(nextOf(n.id, 0), '  ', new Set());
+    if (n.type === 'loop')  l += genChain(nextOf(n.id, 0), '  ', new Set());
+  });
+  const code = hwNotes() + `void setup() {\n${s}}\n\nvoid loop() {\n${l}}\n`;
+  $('#code').textContent = code;
+  return code;
+}
+
+/* ============ projeto padrão (Blink) ============ */
+function demo() {
+  const s = addNode('setup', 40, 40), pm = addNode('pinMode', 40, 130);
+  const lp = addNode('loop', 300, 40), w1 = addNode('dwrite', 300, 130, {val:'HIGH'});
+  const d1 = addNode('delay', 300, 250), w2 = addNode('dwrite', 300, 340, {val:'LOW'});
+  const d2 = addNode('delay', 300, 460);
+  links = [{from:s,port:0,to:pm},{from:lp,port:0,to:w1},{from:w1,port:0,to:d1},
+           {from:d1,port:0,to:w2},{from:w2,port:0,to:d2}];
+  drawLinks(); genCode();
+}
+
+function showTab(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id === id));
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === id));
+}
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => showTab(b.dataset.t));
+function buildPins() {
+  const box = $('#pins'); box.innerHTML = '';
+  for (let p = 0; p <= 13; p++) {
+    const d = document.createElement('div'); d.className = 'pin';
+    d.innerHTML = `<div class="led" id="led${p}"></div><span>D${p}</span>` +
+      (p >= 2 ? `<button data-p="${p}">btn</button>` : '');
+    box.appendChild(d);
+  }
+  const an = $('#analog'); an.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const r = document.createElement('label'); r.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:11px;color:#9aa3b8';
+    r.innerHTML = `A${i} <input type="range" min="0" max="1023" value="512" style="flex:1"><span style="width:34px">512</span>`;
+    const s = r.querySelector('input'), v = r.querySelector('span');
+    s.oninput = () => { analogVals[i] = +s.value; v.textContent = s.value; };
+    an.appendChild(r);
+  }
+}
+function stopSim() { if (direct) { direct.run = false; direct = null; } hwUpdate(); }
+
+/* ============ simulação direta (interpreta os nós, sem compilar) ============ */
+let direct = null;
+const analogVals = [512, 512, 512, 512, 512, 512];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function pinNum(p) { p = String(p).trim().toUpperCase(); return /^A\d$/.test(p) ? 14 + (+p[1]) : parseInt(p, 10); }
+function serialPrint(t) {
+  const o = $('#serialOut'); o.textContent += t;
+  if (o.textContent.length > 5000) o.textContent = o.textContent.slice(-4000);
+  $('#serial').scrollTop = 1e9;
+}
+async function simularDireto() {
+  stopSim(); showTab('pSim'); $('#serialOut').textContent = '';
+  const st = {run: true, mode: {}, out: {}, inp: {}};
+  direct = st; hwReset();
+  for (let p = 0; p <= 13; p++) { st.inp[p] = 1; const l = $('#led' + p); l.classList.remove('on'); l.style.opacity = ''; }
+  document.querySelectorAll('#pins button').forEach(b => {
+    const p = +b.dataset.p, down = () => { st.inp[p] = 0; }, up = () => { st.inp[p] = 1; };
+    b.onmousedown = down; b.onmouseup = up; b.onmouseleave = up;
+  });
+  const setLed = (p, v) => { const l = $('#led' + p); if (!l) return;
+    l.classList.toggle('on', v > 0); l.style.opacity = v > 0 && v < 255 ? (0.25 + 0.75 * v / 255) : ''; hwUpdate(); };
+  const rd = p => st.mode[p] === 'OUTPUT' ? (st.out[p] > 0 ? 1 : 0) : (hwHasPin('D' + p) ? hwRead(p, st.mode[p]) : (st.inp[p] ?? 1));
+  let steps = 0;
+  const run = async id => {
+    while (id != null && st.run) {
+      if (++steps % 200 === 0) await sleep(0);
+      const n = nodes[id], d = n.data, def = DEFS[n.type], last = def.outs.length - 1, p = pinNum(d.pin);
+      switch (n.type) {
+        case 'pinMode': st.mode[p] = d.mode; break;
+        case 'dwrite': { const v = d.val === 'INVERTER' ? (st.out[p] > 0 ? 0 : 255) : (d.val === 'HIGH' ? 255 : 0);
+                         st.out[p] = v; setLed(p, v); break; }
+        case 'awrite': { const v = Math.max(0, Math.min(255, +d.val || 0)); st.out[p] = v; setLed(p, v); break; }
+        case 'delay':  await sleep(Math.max(0, +d.ms || 0)); break;
+        case 'sprint': serialPrint(d.txt + (d.nl === 'println' ? '\n' : '')); break;
+        case 'aread':  serialPrint((hwHasPin('A' + (p - 14)) ? hwAnalog(p - 14) : (analogVals[p - 14] ?? 0)) + '\n'); break;
+        case 'ifpin':  await run(nextOf(id, rd(p) === (d.lvl === 'HIGH' ? 1 : 0) ? 0 : 1)); break;
+        case 'repeat': for (let i = 0; i < (+d.n || 0) && st.run; i++) { await run(nextOf(id, 0)); await sleep(0); } break;
+      }
+      id = nextOf(id, last);
+    }
+  };
+  const hats = t => Object.values(nodes).filter(n => n.type === t).sort((a, b) => a.y - b.y);
+  $('#simInfo').textContent = 'Simulação direta em tempo real (interpreta os nós; não usa o .hex).';
+  for (const hd of hats('setup')) await run(nextOf(hd.id, 0));
+  while (st.run) { for (const hd of hats('loop')) await run(nextOf(hd.id, 0)); await sleep(0); }
+}
+
+function baixarIno() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([genCode()], {type: 'text/plain'}));
+  a.download = 'sketch.ino'; a.click();
+}
+
+/* ============ salvar / abrir ============ */
+function salvar() {
+  const blob = new Blob([JSON.stringify({nodes, links, nid, hw}, null, 1)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'projeto-nos.json'; a.click();
+}
+function abrir(file) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    const d = JSON.parse(rd.result);
+    document.querySelectorAll('.node').forEach(n => n.remove());
+    nodes = {}; links = d.links || []; nid = d.nid || 1;
+        Object.values(d.nodes).forEach(n => addNode(n.type, n.x, n.y, n.data, n.id));
+    hwLoad(d.hw); drawLinks(); genCode();
+  };
+  rd.readAsText(file);
+}
+
+/* ============ eventos ============ */
+$('#bSimD').onclick = simularDireto;
+$('#bIno').onclick = baixarIno;
+$('#bStop').onclick = stopSim;
+$('#bSave').onclick = salvar;
+$('#bOpen').onclick = () => $('#file').click();
+$('#file').onchange = e => e.target.files[0] && abrir(e.target.files[0]);
+$('#scroll').addEventListener('scroll', drawLinks);
+
+
+/* ============ HARDWARE (campo de montagem) ============ */
+const LEDC = {vermelho:'#ef4444', verde:'#22c55e', azul:'#3b82f6', amarelo:'#eab308'};
+const LEDK = Object.keys(LEDC);
+const TERMS = {led:{a:[-8,34],k:[8,34]}, res:{a:[-34,0],b:[34,0]}, btn:{a:[-30,0],b:[30,0]}, pot:{a:[-22,32],w:[0,32],b:[22,32]}};
+const HV = $('#hwsvg');
+let hw = {comps: [], wires: [], id: 1}, hwBurned = {};
+const BP = {};
+['GND','D13','D12','D11','D10','D9','D8','D7','D6','D5','D4','D3','D2','D1','D0'].forEach((n, i) => BP['U.' + n] = {x: 90 + i * 30, y: 66, n});
+['5V','GND','A0','A1','A2','A3','A4','A5'].forEach((n, i) => BP['U.' + (i == 1 ? 'GND2' : n)] = {x: 150 + i * 34, y: 244, n});
+const mk = (t, at, inner) => { const e = document.createElementNS(NS_, t); for (const k in at) e.setAttribute(k, at[k]); if (inner) e.innerHTML = inner; return e; };
+const NS_ = 'http://www.w3.org/2000/svg';
+function sp(e) { const p = HV.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(HV.getScreenCTM().inverse()); }
+function tpos(id) {
+  if (BP[id]) return BP[id];
+  const [cid, t] = id.split('.'), c = hw.comps.find(x => 'c' + x.id === cid);
+  return c ? {x: c.x + TERMS[c.t][t][0], y: c.y + TERMS[c.t][t][1]} : {x: 0, y: 0};
+}
+function hwBoard() {
+  const g = mk('g', {id: 'hwboard'});
+  g.appendChild(mk('rect', {x: 60, y: 40, width: 500, height: 224, rx: 10, fill: '#0b6b4b', stroke: '#064e3b', 'stroke-width': 3}));
+  g.appendChild(mk('text', {x: 310, y: 160, 'text-anchor': 'middle', style: 'font-size:22px;fill:#a7f3d0;font-weight:700'}, 'ARDUINO UNO'));
+  for (const [id, p] of Object.entries(BP)) {
+    g.appendChild(mk('circle', {cx: p.x, cy: p.y, r: 6, class: 'term', 'data-t': id}));
+    g.appendChild(mk('text', {x: p.x, y: p.y < 100 ? p.y + 20 : p.y - 12, 'text-anchor': 'middle'}, p.n));
+  }
+  return g;
+}
+function hwRender() {
+  HV.innerHTML = ''; HV.appendChild(hwBoard());
+  HV.appendChild(mk('g', {id: 'hwwires'}));
+  hw.comps.forEach(drawComp);
+  hwWires(); potBar(); hwUpdate();
+}
+function wireColor(w) { const n = [w.a, w.b].map(x => BP[x] && BP[x].n); return n.includes('GND') ? '#e5e7eb' : n.includes('5V') ? '#f87171' : '#60a5fa'; }
+function hwWires() {
+  const g = $('#hwwires'); if (!g) return; g.innerHTML = '';
+  hw.wires.forEach((w, i) => {
+    const a = tpos(w.a), b = tpos(w.b);
+    const p = mk('path', {d: `M${a.x},${a.y} Q${(a.x + b.x) / 2},${Math.max(a.y, b.y) + 40} ${b.x},${b.y}`, class: 'wire', stroke: wireColor(w)});
+    p.onclick = () => { hw.wires.splice(i, 1); hwWires(); hwUpdate(); genCode(); };
+    g.appendChild(p);
+  });
+}
+function drawComp(c) {
+  const g = mk('g', {id: 'hc' + c.id, class: 'comp', transform: `translate(${c.x},${c.y})`});
+  const T = TERMS[c.t];
+  let body = '';
+  if (c.t === 'led') body = `<line class="leg" x1="-8" y1="12" x2="-8" y2="34"/><line class="leg" x1="8" y1="12" x2="8" y2="34"/><circle class="lb" r="15" fill="${LEDC[c.color]}" opacity=".25" stroke="#fff" stroke-width="2"/><text y="-22" text-anchor="middle">LED ${c.color}</text><text class="bm" y="4" text-anchor="middle" style="font-size:16px"></text>`;
+  if (c.t === 'res') body = `<line class="leg" x1="-34" x2="34"/><rect x="-22" y="-8" width="44" height="16" rx="3" fill="#d6b88a" stroke="#7c5a2a"/><text y="-14" text-anchor="middle">${c.ohm || 220} Ω</text>`;
+  if (c.t === 'btn') body = `<line class="leg" x1="-30" x2="30"/><rect x="-18" y="-18" width="36" height="36" rx="5" fill="#334155" stroke="#94a3b8"/><circle class="cap" r="11" fill="#ef4444" stroke="#7f1d1d" stroke-width="2" style="cursor:pointer"/><text y="-24" text-anchor="middle">Botão</text>`;
+  if (c.t === 'pot') body = `<circle r="22" fill="#1e3a8a" stroke="#93c5fd" stroke-width="2"/><line class="knob" x1="0" y1="0" x2="0" y2="-16" stroke="#fff" stroke-width="3" transform="rotate(${(c.pos - .5) * 270})"/><text y="-28" text-anchor="middle">Pot</text>`;
+  g.innerHTML = body;
+  Object.keys(T).forEach(t => { const m = mk('circle', {cx: T[t][0], cy: T[t][1], r: 5, class: 'term', 'data-t': 'c' + c.id + '.' + t}); g.appendChild(m); });
+  const cap = g.querySelector('.cap');
+  if (cap) cap.onmousedown = e => { e.stopPropagation(); c.pressed = 1; hwUpdate();
+    const up = () => { c.pressed = 0; hwUpdate(); document.removeEventListener('mouseup', up); }; document.addEventListener('mouseup', up); };
+  g.onmousedown = e => {
+    if (e.target.closest('.term') || e.target.closest('.cap')) return;
+    const s = sp(e), ox = s.x - c.x, oy = s.y - c.y; let moved = 0;
+    const mv = ev => { const q = sp(ev); moved++; c.x = q.x - ox; c.y = q.y - oy;
+      g.setAttribute('transform', `translate(${c.x},${c.y})`); hwWires(); };
+    const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up);
+      if (moved < 3 && c.t === 'led') { c.color = LEDK[(LEDK.indexOf(c.color) + 1) % LEDK.length]; hwRender(); } };
+    document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+  };
+  g.ondblclick = () => { hw.comps = hw.comps.filter(x => x !== c); hw.wires = hw.wires.filter(w => !w.a.startsWith('c' + c.id + '.') && !w.b.startsWith('c' + c.id + '.')); hwRender(); genCode(); };
+  HV.appendChild(g);
+}
+HV.addEventListener('mousedown', e => {
+  const t = e.target.closest('.term'); if (!t) return;
+  e.preventDefault(); e.stopPropagation();
+  const from = t.dataset.t, a = tpos(from);
+  const tmp = mk('path', {class: 'wire', stroke: '#fbbf24', 'stroke-dasharray': '5 4', style: 'pointer-events:none'}); HV.appendChild(tmp);
+  const mv = ev => { const q = sp(ev); tmp.setAttribute('d', `M${a.x},${a.y} L${q.x},${q.y}`); };
+  const up = ev => {
+    document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); tmp.remove();
+    const el = document.elementFromPoint(ev.clientX, ev.clientY), to = el && el.closest && el.closest('.term');
+    if (to && to.dataset.t !== from && !hw.wires.some(w => (w.a === from && w.b === to.dataset.t) || (w.b === from && w.a === to.dataset.t))) {
+      hw.wires.push({a: from, b: to.dataset.t}); hwWires(); hwUpdate(); genCode();
+    }
+  };
+  document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+});
+function hwAdd(t, x, y) {
+  const c = {id: hw.id++, t, x: x ?? 120 + Math.random() * 400, y: y ?? 330 + Math.random() * 120};
+  if (t === 'led') c.color = 'vermelho'; if (t === 'res') c.ohm = 220; if (t === 'pot') c.pos = .5;
+  hw.comps.push(c); hwRender(); return c;
+}
+function potBar() {
+  const b = $('#potbar'); b.innerHTML = '';
+  hw.comps.filter(c => c.t === 'pot').forEach(c => {
+    const l = document.createElement('label'); l.innerHTML = `Pot${c.id} <input type="range" min="0" max="100" value="${Math.round(c.pos * 100)}">`;
+    l.querySelector('input').oninput = e => { c.pos = e.target.value / 100;
+      const k = $('#hc' + c.id + ' .knob'); if (k) k.setAttribute('transform', `rotate(${(c.pos - .5) * 270})`); hwUpdate(); };
+    b.appendChild(l);
+  });
+}
+/* ---- modelo elétrico: redes (nets) + fontes fortes ---- */
+function hwModel() {
+  const par = {}, F = x => { if (par[x] === undefined) par[x] = x; return par[x] === x ? x : (par[x] = F(par[x])); };
+  hw.wires.forEach(w => { par[F(w.a)] = F(w.b); });
+  const gnd = Object.keys(BP).filter(k => BP[k].n === 'GND'); gnd.slice(1).forEach(k => { par[F(k)] = F(gnd[0]); });
+  const edges = [], src = {}, add = (n, o) => (src[n] = src[n] || []).push(o), st = direct;
+  hw.comps.forEach(c => {
+    if (c.t === 'res') edges.push({a: F('c' + c.id + '.a'), b: F('c' + c.id + '.b'), r: true});
+    if (c.t === 'btn' && c.pressed) edges.push({a: F('c' + c.id + '.a'), b: F('c' + c.id + '.b'), r: false});
+  });
+  for (const [id, p] of Object.entries(BP)) {
+    if (p.n === '5V') add(F(id), {l: 'H', v: 1});
+    else if (p.n === 'GND') add(F(id), {l: 'L'});
+    else if (p.n[0] === 'D' && st && st.mode[+p.n.slice(1)] === 'OUTPUT') { const v = (st.out[+p.n.slice(1)] || 0) / 255; add(F(id), v > 0 ? {l: 'H', v} : {l: 'L'}); }
+  }
+  return {F, edges, src};
+}
+function reach(n, m) {
+  const seen = new Set(), q = [[n, false]], R = {H: 0, L: 0, Hnr: 0, Lnr: 0, Hv: 0};
+  while (q.length) {
+    const [x, r] = q.pop(), k = x + '|' + r; if (seen.has(k)) continue; seen.add(k);
+    (m.src[x] || []).forEach(s => { if (s.l === 'H') { R.H = 1; R.Hv = Math.max(R.Hv, s.v); if (!r) R.Hnr = 1; } else { R.L = 1; if (!r) R.Lnr = 1; } });
+    m.edges.forEach(e => { if (e.a === x) q.push([e.b, r || e.r]); else if (e.b === x) q.push([e.a, r || e.r]); });
+  }
+  return R;
+}
+function hwHasPin(n) { return hw.wires.some(w => w.a === 'U.' + n || w.b === 'U.' + n); }
+function hwRead(p, mode) {
+  const m = hwModel(), r = reach(m.F('U.D' + p), m);
+  if (r.H && r.L) return r.Hnr && !r.Lnr ? 1 : 0;
+  return r.L ? 0 : r.H ? 1 : (mode === 'INPUT_PULLUP' ? 1 : 0);
+}
+function hwAnalog(k) {
+  const m = hwModel(), n = m.F('U.A' + k), lv = x => { const r = reach(x, m); return r.H && !r.L ? 1 : 0; };
+  const pot = hw.comps.find(c => c.t === 'pot' && m.F('c' + c.id + '.w') === n);
+  if (pot) { const a = lv(m.F('c' + pot.id + '.a')), b = lv(m.F('c' + pot.id + '.b')); return Math.round((a + (b - a) * pot.pos) * 1023); }
+  return lv(n) * 1023;
+}
+function hwReset() { hwBurned = {}; hwUpdate(); }
+function hwUpdate() {
+  if (!$('#hwwires')) return;
+  const m = hwModel(); let curto = false;
+  hw.comps.filter(c => c.t === 'led').forEach(c => {
+    const A = reach(m.F('c' + c.id + '.a'), m), K = reach(m.F('c' + c.id + '.k'), m);
+    if (A.H && K.L && A.Hnr && K.Lnr) hwBurned[c.id] = 1;
+    const on = A.H && K.L && !hwBurned[c.id], lb = $('#hc' + c.id + ' .lb'), bm = $('#hc' + c.id + ' .bm');
+    if (!lb) return;
+    lb.setAttribute('fill', hwBurned[c.id] ? '#444' : LEDC[c.color]);
+    lb.setAttribute('opacity', on ? .45 + .55 * A.Hv : .2);
+    lb.style.filter = on ? `drop-shadow(0 0 ${6 + 12 * A.Hv}px ${LEDC[c.color]})` : '';
+    bm.textContent = hwBurned[c.id] ? '💥' : '';
+  });
+  Object.values(m.src).flat().length && Object.keys(m.src).forEach(n => { const r = reach(n, m); if (r.H && r.L && r.Hnr && r.Lnr) curto = true; });
+  const burned = hw.comps.some(c => hwBurned[c.id]);
+  $('#hwwarn').textContent = curto ? '⚠ Curto-circuito (fonte ligada direto ao GND)' : burned ? '💥 LED queimado: faltou resistor em série' : '';
+}
+function hwNotes() {
+  if (!hw.comps.length) return '';
+  const m = hwModel(), L = [];
+  hw.comps.forEach(c => Object.keys(TERMS[c.t]).forEach(t => {
+    const f = m.F('c' + c.id + '.' + t), pins = Object.keys(BP).filter(k => m.F(k) === f).map(k => BP[k].n);
+    if (pins.length) L.push(`// ${{led:'LED',res:'Resistor',btn:'Botão',pot:'Potenciômetro'}[c.t]} #${c.id} (${t}) -> ${[...new Set(pins)].join(', ')}`);
+  }));
+  return L.length ? '// Ligações do hardware:\n' + L.join('\n') + '\n\n' : '';
+}
+function hwLoad(o) { hw = o && o.comps ? o : {comps: [], wires: [], id: 1}; hwBurned = {}; hwRender(); }
+function hwDemo() {
+  hw = {comps: [], wires: [], id: 1};
+  const r = hwAdd('res', 300, 340), l = hwAdd('led', 460, 340);
+  hw.wires = [{a: 'U.D13', b: 'c' + r.id + '.a'}, {a: 'c' + r.id + '.b', b: 'c' + l.id + '.a'}, {a: 'c' + l.id + '.k', b: 'U.GND'}];
+  hwRender();
+}
+document.querySelectorAll('#hwbar [data-add]').forEach(b => b.onclick = () => { hwAdd(b.dataset.add); genCode(); });
+function aba(h_) {
+  $('#scroll').style.display = h_ ? 'none' : ''; $('#hw').style.display = h_ ? 'flex' : 'none';
+  $('#palette').style.display = h_ ? 'none' : '';
+  $('#bTabP').classList.toggle('pri', !h_); $('#bTabH').classList.toggle('pri', h_);
+  if (!h_) drawLinks();
+}
+$('#bTabP').onclick = () => aba(false); $('#bTabH').onclick = () => aba(true);
+
+buildPins(); demo(); hwDemo();
+</script>
+</body>
+</html>
